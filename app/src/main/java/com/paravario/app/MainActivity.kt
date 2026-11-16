@@ -1,147 +1,178 @@
 package com.paravario.app
 
+import android.Manifest
 import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
+import android.app.AlertDialog
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
 import android.graphics.Typeface
-import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
-import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
-import com.paravario.app.diag.BenchmarkReport
-import com.paravario.app.diag.DeviceReport
-import com.paravario.app.diag.SensorBenchmark
+import com.paravario.app.service.Mode
+import com.paravario.app.service.VarioService
+import com.paravario.app.service.VarioState
+import com.paravario.app.service.Warning
+import com.paravario.app.ui.VarioBarView
+import java.util.Locale
 
-/** Phase 0: diagnostics only. Lists sensors and runs a 10 s still test on the barometer. */
+/** Flight screen: big vertical speed, altitude, ground speed, start/stop. */
 class MainActivity : Activity() {
 
-    private lateinit var sensorManager: SensorManager
-    private lateinit var statusView: TextView
-    private lateinit var reportView: TextView
+    private lateinit var bannerView: TextView
+    private lateinit var varioView: TextView
+    private lateinit var barView: VarioBarView
+    private lateinit var altView: TextView
+    private lateinit var speedView: TextView
+    private lateinit var modeView: TextView
     private lateinit var startButton: Button
 
     private val ui = Handler(Looper.getMainLooper())
-    private var benchmark: SensorBenchmark? = null
-    private var deviceReport = ""
-    private var benchmarkReport = ""
+    private var deviceMode = Mode.NONE
+    private var defaultTextColor = Color.GRAY
 
-    private val progressTick = object : Runnable {
+    private val refresh = object : Runnable {
         override fun run() {
-            val b = benchmark ?: return
-            statusView.text = getString(
-                R.string.status_measuring,
-                b.elapsedSeconds(),
-                SensorBenchmark.MEASURE_SECONDS,
-                b.pressureCount(),
-            )
-            ui.postDelayed(this, 250)
+            render()
+            ui.postDelayed(this, 100)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Some phones throttle sensors when the screen dims, which would spoil the rate test.
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        deviceMode = VarioService.detectMode(getSystemService(SENSOR_SERVICE) as SensorManager)
         setContentView(buildLayout())
-        deviceReport = DeviceReport.build(this, sensorManager)
-        val hasBaro = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE) != null
-        statusView.text = getString(if (hasBaro) R.string.status_ready else R.string.status_no_baro)
-        renderReport()
+        defaultTextColor = altView.currentTextColor
+        showDisclaimerOnce()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ui.post(refresh)
     }
 
     override fun onPause() {
         super.onPause()
-        if (benchmark != null) {
-            cancelBenchmark()
-            statusView.text = getString(R.string.status_cancelled)
-        }
+        ui.removeCallbacks(refresh)
     }
 
-    private fun startBenchmark() {
-        if (benchmark != null) return
-        val sensors = SensorBenchmark.sensorsToTest(sensorManager)
-        if (sensors.isEmpty()) {
-            statusView.text = getString(R.string.status_no_sensors)
+    // ---- Start / stop ----
+
+    private fun toggle() {
+        if (VarioState.snap.running) {
+            VarioService.stop(this)
             return
         }
-        benchmarkReport = ""
-        renderReport()
-        startButton.isEnabled = false
-        val b = SensorBenchmark(sensorManager, sensors)
-        benchmark = b
+        if (deviceMode == Mode.NONE) return
+        val needed = ArrayList<String>()
+        if (!granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            needed.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !granted(Manifest.permission.POST_NOTIFICATIONS)) {
+            needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (needed.isEmpty()) startVario() else requestPermissions(needed.toTypedArray(), REQ_PERMISSIONS)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_PERMISSIONS) startVario()
+    }
+
+    private fun startVario() {
+        if (deviceMode == Mode.GPS_IMU && !granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            // Without a barometer, precise GPS is the only altitude source.
+            AlertDialog.Builder(this)
+                .setMessage(R.string.need_location)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+            return
+        }
         try {
-            startChecked(b)
+            VarioService.start(this)
         } catch (e: Exception) {
-            b.cancel()
-            benchmark = null
-            startButton.isEnabled = true
-            statusView.text = getString(R.string.status_error, e.toString())
-            return
+            AlertDialog.Builder(this).setMessage(e.toString()).setPositiveButton(android.R.string.ok, null).show()
         }
-        ui.post(progressTick)
     }
 
-    private fun startChecked(b: SensorBenchmark) {
-        b.start { results ->
-            // Never let a report bug kill the app: show the error in the report instead.
-            val text = try {
-                BenchmarkReport.format(results)
-            } catch (e: Exception) {
-                "=== TEST ERROR ===\n$e\n"
+    private fun granted(permission: String) = checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
+    // ---- Rendering ----
+
+    private fun render() {
+        val s = VarioState.snap
+        startButton.setText(if (s.running) R.string.btn_stop else R.string.btn_start_vario)
+        startButton.isEnabled = deviceMode != Mode.NONE
+
+        val showVario = s.running && s.ready
+        varioView.text = if (showVario) "%+.1f".format(Locale.US, s.vario) else "--.-"
+        varioView.setTextColor(
+            when {
+                !showVario -> defaultTextColor
+                s.vario >= 0.2 -> VarioBarView.CLIMB
+                s.vario <= -2.0 -> VarioBarView.SINK
+                else -> defaultTextColor
             }
-            ui.post {
-                if (benchmark !== b) return@post
-                benchmark = null
-                ui.removeCallbacks(progressTick)
-                startButton.isEnabled = true
-                benchmarkReport = text
-                statusView.text = getString(R.string.status_done)
-                renderReport()
+        )
+        barView.vario = if (showVario) s.vario.toFloat() else 0f
+        altView.text = if (s.running && !s.altitude.isNaN()) "%.0f m".format(Locale.US, s.altitude) else "-- m"
+        speedView.text = if (s.running && !s.speedKmh.isNaN()) "%.0f km/h".format(Locale.US, s.speedKmh) else "-- km/h"
+
+        modeView.setText(
+            when (deviceMode) {
+                Mode.BARO_IMU -> R.string.mode_baro_imu
+                Mode.BARO_ONLY -> R.string.mode_baro_only
+                Mode.GPS_IMU -> R.string.mode_gps_imu
+                Mode.NONE -> R.string.mode_none
             }
+        )
+
+        val warn = when {
+            deviceMode == Mode.NONE -> R.string.mode_none
+            !s.running -> 0
+            s.warning == Warning.SENSOR_STOPPED -> R.string.warn_sensor
+            s.warning == Warning.GPS_LOST -> R.string.warn_gps_lost
+            s.warning == Warning.AUDIO_ERROR -> R.string.warn_audio
+            s.warning == Warning.CALIBRATING -> R.string.warn_calibrating
+            s.warning == Warning.WAITING_GPS -> R.string.warn_waiting_gps
+            else -> 0
+        }
+        if (warn == 0) {
+            bannerView.visibility = View.INVISIBLE
+        } else {
+            bannerView.setText(warn)
+            val soft = s.warning == Warning.CALIBRATING || s.warning == Warning.WAITING_GPS
+            bannerView.setBackgroundColor(if (soft && deviceMode != Mode.NONE) AMBER else VarioBarView.SINK)
+            bannerView.setTextColor(if (soft && deviceMode != Mode.NONE) Color.BLACK else Color.WHITE)
+            bannerView.visibility = View.VISIBLE
         }
     }
 
-    private fun cancelBenchmark() {
-        benchmark?.cancel()
-        benchmark = null
-        ui.removeCallbacks(progressTick)
-        startButton.isEnabled = true
+    private fun showDisclaimerOnce() {
+        val prefs = getSharedPreferences("app", MODE_PRIVATE)
+        if (prefs.getBoolean("disclaimer_ok", false)) return
+        AlertDialog.Builder(this)
+            .setTitle(R.string.disclaimer_title)
+            .setMessage(R.string.disclaimer_text)
+            .setCancelable(false)
+            .setPositiveButton(R.string.disclaimer_ok) { _, _ ->
+                prefs.edit().putBoolean("disclaimer_ok", true).apply()
+            }
+            .show()
     }
 
-    private fun fullReport(): String = buildString {
-        append(deviceReport)
-        if (benchmarkReport.isNotEmpty()) {
-            appendLine()
-            append(benchmarkReport)
-        }
-        appendLine()
-        appendLine("=== ADB CHECK ===")
-        appendLine(DeviceReport.DUMPSYS_CMD)
-    }
-
-    private fun renderReport() {
-        reportView.text = fullReport()
-    }
-
-    private fun copyReport() {
-        val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("vario-diagnostics", fullReport()))
-        Toast.makeText(this, R.string.toast_copied, Toast.LENGTH_SHORT).show()
-    }
-
-    // ---- Layout (plain Views, no dependencies) ----
+    // ---- Layout ----
 
     private fun dp(v: Int): Int =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
@@ -153,40 +184,69 @@ class MainActivity : Activity() {
         setOnClickListener { onClick() }
     }
 
+    private fun valueView(sizeSp: Float) = TextView(this).apply {
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
+        setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+        gravity = Gravity.CENTER
+    }
+
     private fun buildLayout(): View {
         val pad = dp(16)
+        val match = LinearLayout.LayoutParams.MATCH_PARENT
+        val wrap = LinearLayout.LayoutParams.WRAP_CONTENT
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
 
-        root.addView(TextView(this).apply {
-            setText(R.string.title_phase0)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
+        bannerView = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
             setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            visibility = View.INVISIBLE
+        }
+        root.addView(bannerView, LinearLayout.LayoutParams(match, wrap))
+
+        varioView = valueView(96f).apply { text = "--.-" }
+        root.addView(varioView, LinearLayout.LayoutParams(match, 0, 1f))
+
+        root.addView(TextView(this).apply {
+            text = "m/s"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+            gravity = Gravity.CENTER
         })
 
-        statusView = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            setPadding(0, dp(8), 0, dp(8))
-        }
-        root.addView(statusView)
+        barView = VarioBarView(this)
+        root.addView(barView, LinearLayout.LayoutParams(match, dp(28)).apply { topMargin = dp(8); bottomMargin = dp(16) })
 
-        startButton = bigButton(R.string.btn_start) { startBenchmark() }
-        val copyButton = bigButton(R.string.btn_copy) { copyReport() }
+        altView = valueView(40f)
+        speedView = valueView(40f)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(startButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(copyButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(altView, LinearLayout.LayoutParams(0, wrap, 1f))
+        row.addView(speedView, LinearLayout.LayoutParams(0, wrap, 1f))
         root.addView(row)
 
-        reportView = TextView(this).apply {
-            typeface = Typeface.MONOSPACE
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            setTextIsSelectable(true)
-            setPadding(0, dp(12), 0, 0)
+        modeView = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(12))
         }
-        val scroll = ScrollView(this).apply { addView(reportView) }
-        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(modeView)
+
+        startButton = bigButton(R.string.btn_start_vario) { toggle() }
+        root.addView(startButton, LinearLayout.LayoutParams(match, dp(80)))
+
+        val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row2.addView(
+            bigButton(R.string.btn_test_tones) { startActivity(Intent(this, ToneTestActivity::class.java)) },
+            LinearLayout.LayoutParams(0, wrap, 1f)
+        )
+        row2.addView(
+            bigButton(R.string.btn_diagnostics) { startActivity(Intent(this, DiagnosticsActivity::class.java)) },
+            LinearLayout.LayoutParams(0, wrap, 1f)
+        )
+        root.addView(row2)
 
         // targetSdk 35+ forces edge-to-edge on Android 15+, so pad for the system bars.
         root.setOnApplyWindowInsetsListener { v, insets ->
@@ -203,5 +263,10 @@ class MainActivity : Activity() {
             insets
         }
         return root
+    }
+
+    private companion object {
+        const val REQ_PERMISSIONS = 1
+        val AMBER = 0xFFFFC107.toInt()
     }
 }

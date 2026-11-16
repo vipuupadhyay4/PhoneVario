@@ -1,6 +1,18 @@
 # Para Vario: offline Android audio variometer
 
-Current state: **Phase 0, device check** (diagnostics only, no vario sound yet).
+Current state: **Phase 1**. Working audio vario in a foreground service, with a flight screen, a tone test screen and the Phase 0 sensor diagnostics.
+
+## Altitude sources
+
+The app checks the phone on start and picks the best source it has:
+
+| Mode | Used when | Accuracy |
+|---|---|---|
+| Barometer + motion sensors | the phone has a barometer, accelerometer and rotation vector | High. Fused Kalman filter, climb tone from +0.2 m/s. |
+| Barometer only | barometer but no motion sensors | Good, with about 1.5 s more lag. |
+| GPS + motion sensors | no barometer | **Low.** GPS altitude at about 1 Hz corrects the accelerometer. Climb tone from +0.5 m/s. |
+
+The filter and the tone engine are the same in every mode; only the altitude measurement and its noise setting change.
 
 The app is fully offline. It never declares the `INTERNET` permission and has no analytics, ads or network libraries.
 
@@ -31,9 +43,19 @@ adb install -r app-debug.apk
 | Phase | Permission | Why |
 |---|---|---|
 | 0 | none | Sensor access needs no permission. |
-| 1+ | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS`, `WAKE_LOCK` | Keep sensors, filter and audio running with the screen off, behind a persistent notification. |
-| 3+ | `ACCESS_FINE_LOCATION` | GPS ground speed, GPS altitude, QNH auto-calibration and IGC positions. |
+| 1+ | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `FOREGROUND_SERVICE_SPECIAL_USE`, `POST_NOTIFICATIONS`, `WAKE_LOCK` | Keep sensors, filter and audio running with the screen off, behind a persistent notification. |
+| 1+ | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` | GPS ground speed and GPS altitude. On phones without a barometer, GPS is the altitude source, so the vario cannot start without it. Later: QNH auto-calibration and IGC positions. |
 | 5 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Opens the system dialog that exempts the app from battery optimisation. |
+
+## Phase 1: how to test
+
+1. Open **Test tones** and move the slider. Climb gives beeps that get higher and faster, strong sink gives a continuous low tone, and the band in between is silent.
+2. Go outside (GPS mode needs a sky view), press **START VARIO**, allow location and notifications, and hold the phone still for 2 seconds while it calibrates.
+3. Raise and lower the phone, or use stairs or a lift. On a barometer phone the beeps should follow within a fraction of a second. In GPS mode expect a slower, rougher reading.
+4. Turn the screen off. The sound must continue.
+5. Media volume controls the loudness.
+
+A double high pip every 3 seconds is the warning tone: a sensor stopped or, in GPS mode, the GPS fix was lost. The screen shows a red banner with the reason.
 
 ## Phase 0: how to test
 

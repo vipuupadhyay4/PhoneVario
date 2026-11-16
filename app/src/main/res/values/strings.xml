@@ -12,4 +12,25 @@
     <string name="btn_copy">Copy report</string>
     <string name="toast_copied">Report copied</string>
     <string name="status_error">Test could not start: %1$s</string>
+    <string name="btn_start_vario">START VARIO</string>
+    <string name="btn_stop">STOP</string>
+    <string name="btn_test_tones">Test tones</string>
+    <string name="btn_diagnostics">Diagnostics</string>
+    <string name="mode_baro_imu">Mode: barometer + motion sensors (high accuracy)</string>
+    <string name="mode_baro_only">Mode: barometer only</string>
+    <string name="mode_gps_imu">Mode: GPS + motion sensors. LOW ACCURACY, this phone has no barometer</string>
+    <string name="mode_none">This phone has no barometer and no motion sensors. The vario cannot run.</string>
+    <string name="warn_sensor">SENSOR STOPPED. Vario is not working!</string>
+    <string name="warn_gps_lost">GPS LOST. Vario is muted!</string>
+    <string name="warn_audio">AUDIO ERROR. No sound!</string>
+    <string name="warn_calibrating">Calibrating, hold the phone still…</string>
+    <string name="warn_waiting_gps">Waiting for GPS. Go outside and check that Location is on.</string>
+    <string name="need_location">This phone has no barometer, so the vario needs precise GPS location. Please allow precise location and press Start again.</string>
+    <string name="notif_channel">Vario running</string>
+    <string name="notif_title">Para Vario is running</string>
+    <string name="notif_text">Tap to open. Press STOP in the app to end.</string>
+    <string name="tone_test_hint">Move the slider to hear the vario sound for any climb or sink rate (m/s). Silent between the sink and climb thresholds.</string>
+    <string name="disclaimer_title">Flight aid only</string>
+    <string name="disclaimer_text">This app is a flight aid, not a certified instrument. Never rely on it alone; fly with a proven vario as your main instrument.\n\nKeep the phone in a closed cockpit pouch, out of direct airflow. Wind on the phone corrupts the pressure reading.\n\nOn phones without a barometer the app uses GPS and is LOW ACCURACY.</string>
+    <string name="disclaimer_ok">I understand</string>
 </resources>

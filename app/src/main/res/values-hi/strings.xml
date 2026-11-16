@@ -12,4 +12,25 @@
     <string name="btn_copy">रिपोर्ट कॉपी करें</string>
     <string name="toast_copied">रिपोर्ट कॉपी हो गई</string>
     <string name="status_error">टेस्ट शुरू नहीं हो सका: %1$s</string>
+    <string name="btn_start_vario">वेरियो शुरू करें</string>
+    <string name="btn_stop">बंद करें</string>
+    <string name="btn_test_tones">टोन टेस्ट</string>
+    <string name="btn_diagnostics">सेंसर जाँच</string>
+    <string name="mode_baro_imu">मोड: बैरोमीटर + मोशन सेंसर (उच्च सटीकता)</string>
+    <string name="mode_baro_only">मोड: केवल बैरोमीटर</string>
+    <string name="mode_gps_imu">मोड: GPS + मोशन सेंसर। कम सटीकता, इस फ़ोन में बैरोमीटर नहीं है</string>
+    <string name="mode_none">इस फ़ोन में बैरोमीटर और मोशन सेंसर नहीं हैं। वेरियो नहीं चल सकता।</string>
+    <string name="warn_sensor">सेंसर बंद हो गया। वेरियो काम नहीं कर रहा!</string>
+    <string name="warn_gps_lost">GPS खो गया। वेरियो म्यूट है!</string>
+    <string name="warn_audio">ऑडियो त्रुटि। आवाज़ नहीं आएगी!</string>
+    <string name="warn_calibrating">कैलिब्रेट हो रहा है, फ़ोन स्थिर रखें…</string>
+    <string name="warn_waiting_gps">GPS का इंतज़ार। बाहर जाएँ और देखें कि Location चालू है।</string>
+    <string name="need_location">इस फ़ोन में बैरोमीटर नहीं है, इसलिए वेरियो को सटीक GPS लोकेशन चाहिए। सटीक लोकेशन की अनुमति दें और फिर Start दबाएँ।</string>
+    <string name="notif_channel">वेरियो चालू</string>
+    <string name="notif_title">Para Vario चल रहा है</string>
+    <string name="notif_text">खोलने के लिए टैप करें। बंद करने के लिए ऐप में बंद करें दबाएँ।</string>
+    <string name="tone_test_hint">स्लाइडर घुमाकर किसी भी चढ़ाई या गिरावट दर (m/s) की वेरियो आवाज़ सुनें। सिंक और क्लाइम्ब सीमा के बीच आवाज़ नहीं आती।</string>
+    <string name="disclaimer_title">केवल उड़ान सहायक</string>
+    <string name="disclaimer_text">यह ऐप उड़ान में मदद के लिए है, प्रमाणित उपकरण नहीं। केवल इसी पर भरोसा न करें; मुख्य उपकरण के रूप में भरोसेमंद वेरियो साथ रखें।\n\nफ़ोन को बंद कॉकपिट पाउच में, सीधी हवा से दूर रखें। फ़ोन पर हवा लगने से प्रेशर रीडिंग बिगड़ती है।\n\nबिना बैरोमीटर वाले फ़ोन पर ऐप GPS से चलता है और उसकी सटीकता कम है।</string>
+    <string name="disclaimer_ok">समझ गया</string>
 </resources>
