@@ -11,4 +11,5 @@
     <string name="btn_start">Start 10 s test</string>
     <string name="btn_copy">Copy report</string>
     <string name="toast_copied">Report copied</string>
+    <string name="status_error">Test could not start: %1$s</string>
 </resources>

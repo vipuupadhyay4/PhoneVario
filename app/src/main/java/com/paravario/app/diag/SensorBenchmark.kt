@@ -28,6 +28,7 @@ class SensorBenchmark(
     companion object {
         const val MEASURE_SECONDS = 10
         private const val WARMUP_MS = 1000L
+        private const val MIN_PERIOD_US = 5000 // 200 Hz, the no-permission limit
 
         fun sensorsToTest(sm: SensorManager): List<Sensor> = listOf(
             Sensor.TYPE_PRESSURE,
@@ -71,8 +72,12 @@ class SensorBenchmark(
 
     fun start(onDone: (List<ChannelResult>) -> Unit) {
         measureStartNs = SystemClock.elapsedRealtimeNanos() + WARMUP_MS * 1_000_000
+        // Android 12+ throws SecurityException in debuggable apps when a rate above 200 Hz
+        // (e.g. SENSOR_DELAY_FASTEST) is requested without HIGH_SAMPLING_RATE_SENSORS.
+        // So ask for the sensor's own fastest rate, capped at 200 Hz.
         for (c in channels) {
-            sensorManager.registerListener(c, c.sensor, SensorManager.SENSOR_DELAY_FASTEST, handler)
+            val periodUs = maxOf(c.sensor.minDelay, MIN_PERIOD_US)
+            sensorManager.registerListener(c, c.sensor, periodUs, handler)
         }
         handler.postDelayed({
             channels.forEach { sensorManager.unregisterListener(it) }

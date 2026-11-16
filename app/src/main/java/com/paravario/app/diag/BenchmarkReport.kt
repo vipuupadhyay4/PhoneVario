@@ -13,7 +13,7 @@ object BenchmarkReport {
     private const val NOISE_USABLE_M = 0.40
 
     fun format(results: List<ChannelResult>): String = buildString {
-        appendLine("=== ${SensorBenchmark.MEASURE_SECONDS} s STILL TEST (fastest rate) ===")
+        appendLine("=== ${SensorBenchmark.MEASURE_SECONDS} s STILL TEST (max rate, capped at 200 Hz) ===")
         for (r in results) {
             appendLine()
             when (r.sensor.type) {

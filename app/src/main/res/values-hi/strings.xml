@@ -11,4 +11,5 @@
     <string name="btn_start">10 से. टेस्ट शुरू करें</string>
     <string name="btn_copy">रिपोर्ट कॉपी करें</string>
     <string name="toast_copied">रिपोर्ट कॉपी हो गई</string>
+    <string name="status_error">टेस्ट शुरू नहीं हो सका: %1$s</string>
 </resources>

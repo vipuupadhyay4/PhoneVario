@@ -81,8 +81,26 @@ class MainActivity : Activity() {
         startButton.isEnabled = false
         val b = SensorBenchmark(sensorManager, sensors)
         benchmark = b
+        try {
+            startChecked(b)
+        } catch (e: Exception) {
+            b.cancel()
+            benchmark = null
+            startButton.isEnabled = true
+            statusView.text = getString(R.string.status_error, e.toString())
+            return
+        }
+        ui.post(progressTick)
+    }
+
+    private fun startChecked(b: SensorBenchmark) {
         b.start { results ->
-            val text = BenchmarkReport.format(results)
+            // Never let a report bug kill the app: show the error in the report instead.
+            val text = try {
+                BenchmarkReport.format(results)
+            } catch (e: Exception) {
+                "=== TEST ERROR ===\n$e\n"
+            }
             ui.post {
                 if (benchmark !== b) return@post
                 benchmark = null
@@ -93,7 +111,6 @@ class MainActivity : Activity() {
                 renderReport()
             }
         }
-        ui.post(progressTick)
     }
 
     private fun cancelBenchmark() {
