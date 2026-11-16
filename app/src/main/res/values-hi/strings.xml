@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Para Vario</string>
+    <string name="title_phase0">चरण 0 · सेंसर जाँच</string>
+    <string name="status_ready">फ़ोन को मेज़ पर सीधा रखें, पंखे, AC और खुली खिड़की से दूर। Start दबाएँ और 11 सेकंड तक फ़ोन को न छुएँ।</string>
+    <string name="status_no_baro">बैरोमीटर नहीं मिला। यह फ़ोन भरोसेमंद वेरियो नहीं बन सकता। मोशन सेंसर के लिए टेस्ट फिर भी चला सकते हैं।</string>
+    <string name="status_no_sensors">कोई उपयोगी सेंसर नहीं मिला।</string>
+    <string name="status_measuring">माप रहे हैं… %1$.1f / %2$d से. · प्रेशर सैंपल: %3$d</string>
+    <string name="status_done">पूरा हुआ। रिपोर्ट कॉपी करें और चैट में पेस्ट करें।</string>
+    <string name="status_cancelled">ऐप स्क्रीन से हट गया, इसलिए टेस्ट रद्द हुआ। फिर से Start दबाएँ।</string>
+    <string name="btn_start">10 से. टेस्ट शुरू करें</string>
+    <string name="btn_copy">रिपोर्ट कॉपी करें</string>
+    <string name="toast_copied">रिपोर्ट कॉपी हो गई</string>
+</resources>

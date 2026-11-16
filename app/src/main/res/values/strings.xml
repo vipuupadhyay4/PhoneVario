@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Para Vario</string>
+    <string name="title_phase0">Phase 0 · Sensor check</string>
+    <string name="status_ready">Put the phone flat on a table, away from fans, AC and open windows. Press Start and do not touch it for 11 seconds.</string>
+    <string name="status_no_baro">No barometer found. This phone cannot be a reliable vario. You can still run the test for the motion sensors.</string>
+    <string name="status_no_sensors">No usable sensors found.</string>
+    <string name="status_measuring">Measuring… %1$.1f / %2$d s · pressure samples: %3$d</string>
+    <string name="status_done">Done. Press Copy report and paste it into the chat.</string>
+    <string name="status_cancelled">Test cancelled because the app left the screen. Press Start again.</string>
+    <string name="btn_start">Start 10 s test</string>
+    <string name="btn_copy">Copy report</string>
+    <string name="toast_copied">Report copied</string>
+</resources>
