@@ -33,4 +33,18 @@
     <string name="disclaimer_title">Flight aid only</string>
     <string name="disclaimer_text">This app is a flight aid, not a certified instrument. Never rely on it alone; fly with a proven vario as your main instrument.\n\nKeep the phone in a closed cockpit pouch, out of direct airflow. Wind on the phone corrupts the pressure reading.\n\nOn phones without a barometer the app uses GPS and is LOW ACCURACY.</string>
     <string name="disclaimer_ok">I understand</string>
+    <string name="btn_calibrate">Calibrate motion sensor</string>
+    <string name="warn_not_calibrated">Motion sensor not calibrated. Press Calibrate once before using the vario.</string>
+    <string name="cal_title">Motion sensor calibration</string>
+    <string name="cal_hint">Hold the phone still in each of the six positions for about 2 seconds, in any order. Resting it against a wall or a box helps. It does not have to be perfectly level.</string>
+    <string name="face_z_up">Flat, screen up</string>
+    <string name="face_z_down">Flat, screen down</string>
+    <string name="face_y_up">Standing upright</string>
+    <string name="face_y_down">Standing upside down</string>
+    <string name="face_x_up">On its left edge</string>
+    <string name="face_x_down">On its right edge</string>
+    <string name="cal_status_collecting">Waiting for the phone to be still…</string>
+    <string name="cal_status_failed">Calibration failed: the readings do not fit. Press Start again and hold the phone more still.</string>
+    <string name="cal_status_done">Saved.\nOffset (m/s²): %1$s\nScale: %2$s\nRestart the vario to use it.</string>
+    <string name="cal_restart">Start again</string>
 </resources>

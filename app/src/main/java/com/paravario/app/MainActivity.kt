@@ -140,7 +140,7 @@ class MainActivity : Activity() {
 
         val warn = when {
             deviceMode == Mode.NONE -> R.string.mode_none
-            !s.running -> 0
+            !s.running -> if (needsCalibration()) R.string.warn_not_calibrated else 0
             s.warning == Warning.SENSOR_STOPPED -> R.string.warn_sensor
             s.warning == Warning.GPS_LOST -> R.string.warn_gps_lost
             s.warning == Warning.AUDIO_ERROR -> R.string.warn_audio
@@ -152,12 +152,15 @@ class MainActivity : Activity() {
             bannerView.visibility = View.INVISIBLE
         } else {
             bannerView.setText(warn)
-            val soft = s.warning == Warning.CALIBRATING || s.warning == Warning.WAITING_GPS
+            val soft = !s.running || s.warning == Warning.CALIBRATING || s.warning == Warning.WAITING_GPS
             bannerView.setBackgroundColor(if (soft && deviceMode != Mode.NONE) AMBER else VarioBarView.SINK)
             bannerView.setTextColor(if (soft && deviceMode != Mode.NONE) Color.BLACK else Color.WHITE)
             bannerView.visibility = View.VISIBLE
         }
     }
+
+    private fun needsCalibration() = deviceMode != Mode.BARO_ONLY &&
+        getSharedPreferences("app", MODE_PRIVATE).getString(CalibrationActivity.PREF_KEY, null) == null
 
     private fun showDisclaimerOnce() {
         val prefs = getSharedPreferences("app", MODE_PRIVATE)
@@ -247,6 +250,10 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(0, wrap, 1f)
         )
         root.addView(row2)
+        root.addView(
+            bigButton(R.string.btn_calibrate) { startActivity(Intent(this, CalibrationActivity::class.java)) },
+            LinearLayout.LayoutParams(match, wrap)
+        )
 
         // targetSdk 35+ forces edge-to-edge on Android 15+, so pad for the system bars.
         root.setOnApplyWindowInsetsListener { v, insets ->

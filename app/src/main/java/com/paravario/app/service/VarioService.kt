@@ -25,10 +25,12 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import com.paravario.app.CalibrationActivity
 import com.paravario.app.MainActivity
 import com.paravario.app.R
 import com.paravario.app.audio.ToneEngine
 import com.paravario.app.diag.Altitude
+import com.paravario.app.vario.AccelCal
 import com.paravario.app.vario.FilterDefaults
 import com.paravario.app.vario.Kalman2
 import com.paravario.app.vario.Kalman3
@@ -89,6 +91,7 @@ class VarioService : Service(), SensorEventListener, LocationListener {
     private val kf3 = Kalman3(FilterDefaults.BARO_ACCEL_SIGMA, FilterDefaults.BARO_BIAS_WALK)
     private val kf2 = Kalman2(FilterDefaults.BARO_ONLY_ACCEL_SIGMA)
     private var altitudeVariance = FilterDefaults.BARO_VARIANCE
+    private var cal = AccelCal.IDENTITY
 
     // All fields below are touched only on the worker thread.
     private val quat = FloatArray(4)
@@ -127,6 +130,8 @@ class VarioService : Service(), SensorEventListener, LocationListener {
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         mode = detectMode(sensorManager)
+        cal = AccelCal.decode(getSharedPreferences("app", MODE_PRIVATE).getString(CalibrationActivity.PREF_KEY, null))
+            ?: AccelCal.IDENTITY
         val hasLocation = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
         try {
@@ -261,7 +266,11 @@ class VarioService : Service(), SensorEventListener, LocationListener {
         lastAccelMs = SystemClock.elapsedRealtime()
         if (!haveRot) return
         // Earth-frame vertical acceleration with gravity removed.
-        val az = rot[6] * e.values[0] + rot[7] * e.values[1] + rot[8] * e.values[2] - G
+        // Per-axis calibration first, otherwise tilting the phone looks like climb or sink.
+        val ax = (e.values[0] - cal.offset[0]) * cal.scale[0]
+        val ay = (e.values[1] - cal.offset[1]) * cal.scale[1]
+        val azBody = (e.values[2] - cal.offset[2]) * cal.scale[2]
+        val az = rot[6] * ax + rot[7] * ay + rot[8] * azBody - G
 
         if (!calibrated) {
             // Average for 2 s to get the starting accelerometer bias.
