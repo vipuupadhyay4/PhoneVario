@@ -78,11 +78,6 @@ class KalmanTest {
         4, altNoise, accelNoise, seed,
     )
 
-    private fun gpsFused(altNoise: Double, accelNoise: Double, seed: Long = 1) = runFused(
-        FilterDefaults.GPS_ACCEL_SIGMA, FilterDefaults.GPS_BIAS_WALK, FilterDefaults.GPS_VARIANCE,
-        100, altNoise, accelNoise, seed,
-    )
-
     @Test
     fun baroFusedStepSettlesWithinOneSecondWithoutOvershoot() {
         val s = baroFused(0.0, 0.0)
@@ -95,22 +90,6 @@ class KalmanTest {
     fun baroFusedNoiseIsLow() {
         for (seed in 1L..5L) {
             assertTrue(rms(baroFused(0.25, 0.08, seed), 25.0, 49.0) < 0.15)
-        }
-    }
-
-    @Test
-    fun gpsFusedStepFollowsAccelerometer() {
-        val s = gpsFused(0.0, 0.0)
-        assertTrue(abs(s.first { it.t >= 19.0 }.est) < 0.1)
-        assertTrue(s.filter { it.t in 20.0..30.0 }.maxOf { it.est } < 2.2)
-        assertTrue(s.filter { it.t in 21.0..30.0 }.all { abs(it.est - 2.0) < 0.2 })
-    }
-
-    @Test
-    fun gpsFusedNoiseStaysUsable() {
-        // 1 Hz GPS altitude with 1 m noise: clearly worse than a barometer, but bounded.
-        for (seed in 1L..5L) {
-            assertTrue(rms(gpsFused(1.0, 0.08, seed), 25.0, 49.0) < 1.0)
         }
     }
 

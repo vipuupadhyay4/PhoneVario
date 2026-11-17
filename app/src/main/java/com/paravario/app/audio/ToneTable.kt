@@ -45,6 +45,8 @@ class ToneTable(points: List<TonePoint>) {
         const val DEFAULT_TEXT = "tone=-10.0,200,100,100\n" +
             "tone=-3.0,280,100,100\n" +
             "tone=-2.5,300,500,100\n" +
+            "tone=-2.4,310,600,30\n" +
+            "tone=-0.5,380,1200,20\n" +
             "tone=0.2,700,600,50\n" +
             "tone=1.0,850,500,50\n" +
             "tone=2.0,1000,400,50\n" +

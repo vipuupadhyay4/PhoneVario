@@ -67,6 +67,7 @@ class ToneTestActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        tone.sinkOn = -0.5
         tone.active = true
         tone.start()
     }

@@ -21,6 +21,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.paravario.app.service.Mode
 import com.paravario.app.service.VarioService
+import com.paravario.app.service.VarioSettings
 import com.paravario.app.service.VarioState
 import com.paravario.app.service.Warning
 import com.paravario.app.ui.VarioBarView
@@ -30,6 +31,10 @@ import java.util.Locale
 class MainActivity : Activity() {
 
     private lateinit var bannerView: TextView
+    private lateinit var statusLabel: TextView
+    private lateinit var gpsInfoView: TextView
+    private lateinit var lossButton: Button
+    private lateinit var sensButton: Button
     private lateinit var varioView: TextView
     private lateinit var barView: VarioBarView
     private lateinit var altView: TextView
@@ -51,6 +56,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         deviceMode = VarioService.detectMode(getSystemService(SENSOR_SERVICE) as SensorManager)
+        VarioSettings.load(this)
         setContentView(buildLayout())
         defaultTextColor = altView.currentTextColor
         showDisclaimerOnce()
@@ -91,7 +97,7 @@ class MainActivity : Activity() {
     }
 
     private fun startVario() {
-        if (deviceMode == Mode.GPS_IMU && !granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+        if (deviceMode == Mode.GPS && !granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
             // Without a barometer, precise GPS is the only altitude source.
             AlertDialog.Builder(this)
                 .setMessage(R.string.need_location)
@@ -116,15 +122,22 @@ class MainActivity : Activity() {
         startButton.isEnabled = deviceMode != Mode.NONE
 
         val showVario = s.running && s.ready
-        varioView.text = if (showVario) "%+.1f".format(Locale.US, s.vario) else "--.-"
-        varioView.setTextColor(
+        val zoneColor = when {
+            !showVario || s.zone == 0 -> defaultTextColor
+            s.zone > 0 -> VarioBarView.CLIMB
+            else -> VarioBarView.SINK
+        }
+        statusLabel.setText(
             when {
-                !showVario -> defaultTextColor
-                s.vario >= 0.2 -> VarioBarView.CLIMB
-                s.vario <= -2.0 -> VarioBarView.SINK
-                else -> defaultTextColor
+                !showVario -> R.string.status_wait
+                s.zone > 0 -> R.string.status_climb
+                s.zone < 0 -> R.string.status_sink
+                else -> R.string.status_level
             }
         )
+        statusLabel.setTextColor(zoneColor)
+        varioView.text = if (showVario) "%+.1f".format(Locale.US, s.vario) else "--.-"
+        varioView.setTextColor(zoneColor)
         barView.vario = if (showVario) s.vario.toFloat() else 0f
         altView.text = if (s.running && !s.altitude.isNaN()) "%.0f m".format(Locale.US, s.altitude) else "-- m"
         speedView.text = if (s.running && !s.speedKmh.isNaN()) "%.0f km/h".format(Locale.US, s.speedKmh) else "-- km/h"
@@ -133,8 +146,30 @@ class MainActivity : Activity() {
             when (deviceMode) {
                 Mode.BARO_IMU -> R.string.mode_baro_imu
                 Mode.BARO_ONLY -> R.string.mode_baro_only
-                Mode.GPS_IMU -> R.string.mode_gps_imu
+                Mode.GPS -> R.string.mode_gps
                 Mode.NONE -> R.string.mode_none
+            }
+        )
+        gpsInfoView.text = if (s.running && s.mode == Mode.GPS && s.gpsFix) {
+            getString(
+                R.string.gps_info,
+                s.gpsRateHz,
+                if (s.gpsNoise.isNaN()) "–" else "%.1f".format(Locale.US, s.gpsNoise),
+                if (s.gpsAccuracy.isNaN()) "–" else "%.0f".format(Locale.US, s.gpsAccuracy),
+            )
+        } else ""
+        lossButton.setText(
+            when (VarioSettings.lossMode) {
+                VarioSettings.LOSS_STRONG -> R.string.loss_strong
+                VarioSettings.LOSS_OFF -> R.string.loss_off
+                else -> R.string.loss_all
+            }
+        )
+        sensButton.setText(
+            when (VarioSettings.sensitivity) {
+                0 -> R.string.sens_low
+                2 -> R.string.sens_high
+                else -> R.string.sens_normal
             }
         )
 
@@ -146,20 +181,22 @@ class MainActivity : Activity() {
             s.warning == Warning.AUDIO_ERROR -> R.string.warn_audio
             s.warning == Warning.CALIBRATING -> R.string.warn_calibrating
             s.warning == Warning.WAITING_GPS -> R.string.warn_waiting_gps
+            s.warning == Warning.GPS_WEAK -> R.string.warn_gps_weak
             else -> 0
         }
         if (warn == 0) {
             bannerView.visibility = View.INVISIBLE
         } else {
             bannerView.setText(warn)
-            val soft = !s.running || s.warning == Warning.CALIBRATING || s.warning == Warning.WAITING_GPS
+            val soft = !s.running || s.warning == Warning.CALIBRATING || s.warning == Warning.WAITING_GPS ||
+                s.warning == Warning.GPS_WEAK
             bannerView.setBackgroundColor(if (soft && deviceMode != Mode.NONE) AMBER else VarioBarView.SINK)
             bannerView.setTextColor(if (soft && deviceMode != Mode.NONE) Color.BLACK else Color.WHITE)
             bannerView.visibility = View.VISIBLE
         }
     }
 
-    private fun needsCalibration() = deviceMode != Mode.BARO_ONLY &&
+    private fun needsCalibration() = deviceMode == Mode.BARO_IMU &&
         getSharedPreferences("app", MODE_PRIVATE).getString(CalibrationActivity.PREF_KEY, null) == null
 
     private fun showDisclaimerOnce() {
@@ -211,6 +248,9 @@ class MainActivity : Activity() {
         }
         root.addView(bannerView, LinearLayout.LayoutParams(match, wrap))
 
+        statusLabel = valueView(26f).apply { setTypeface(Typeface.DEFAULT, Typeface.BOLD) }
+        root.addView(statusLabel, LinearLayout.LayoutParams(match, wrap))
+
         varioView = valueView(96f).apply { text = "--.-" }
         root.addView(varioView, LinearLayout.LayoutParams(match, 0, 1f))
 
@@ -230,15 +270,38 @@ class MainActivity : Activity() {
         row.addView(speedView, LinearLayout.LayoutParams(0, wrap, 1f))
         root.addView(row)
 
+        gpsInfoView = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, 0)
+        }
+        root.addView(gpsInfoView)
+
         modeView = TextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             gravity = Gravity.CENTER
-            setPadding(0, dp(12), 0, dp(12))
+            setPadding(0, dp(6), 0, dp(8))
         }
         root.addView(modeView)
 
         startButton = bigButton(R.string.btn_start_vario) { toggle() }
-        root.addView(startButton, LinearLayout.LayoutParams(match, dp(80)))
+        root.addView(startButton, LinearLayout.LayoutParams(match, dp(72)))
+
+        lossButton = bigButton(R.string.loss_all) {
+            VarioSettings.lossMode = (VarioSettings.lossMode + 1) % 3
+            VarioSettings.save(this)
+        }
+        sensButton = bigButton(R.string.sens_normal) {
+            VarioSettings.sensitivity = (VarioSettings.sensitivity + 1) % 3
+            VarioSettings.save(this)
+        }
+        for (b in listOf(lossButton, sensButton)) b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        if (deviceMode == Mode.GPS) {
+            val settingsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            settingsRow.addView(lossButton, LinearLayout.LayoutParams(0, wrap, 1f))
+            settingsRow.addView(sensButton, LinearLayout.LayoutParams(0, wrap, 1f))
+            root.addView(settingsRow)
+        }
 
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         row2.addView(
@@ -250,10 +313,13 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(0, wrap, 1f)
         )
         root.addView(row2)
-        root.addView(
-            bigButton(R.string.btn_calibrate) { startActivity(Intent(this, CalibrationActivity::class.java)) },
-            LinearLayout.LayoutParams(match, wrap)
-        )
+        if (deviceMode == Mode.BARO_IMU) {
+            // The motion sensor is only used together with a barometer.
+            root.addView(
+                bigButton(R.string.btn_calibrate) { startActivity(Intent(this, CalibrationActivity::class.java)) },
+                LinearLayout.LayoutParams(match, wrap)
+            )
+        }
 
         // targetSdk 35+ forces edge-to-edge on Android 15+, so pad for the system bars.
         root.setOnApplyWindowInsetsListener { v, insets ->

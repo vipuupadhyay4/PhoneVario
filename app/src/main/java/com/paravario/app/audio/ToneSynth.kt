@@ -12,6 +12,9 @@ class ToneSynth(private val sampleRate: Int, private val table: ToneTable) {
     var climbOn = 0.2
     var sinkOn = -2.5
 
+    /** [ZONE_AUTO]: thresholds above decide. +1 / -1 / 0: the caller has decided climb / loss / silent. */
+    var forcedZone = ZONE_AUTO
+
     private enum class Zone { SILENT, CLIMB, SINK }
 
     private var zone = Zone.SILENT
@@ -35,13 +38,17 @@ class ToneSynth(private val sampleRate: Int, private val table: ToneTable) {
     fun render(out: ShortArray, n: Int, vario: Double, active: Boolean, alarm: Boolean, volume: Double) {
         val tone: TonePoint? = when {
             alarm -> null
-            active -> select(vario)
-            else -> { zone = Zone.SILENT; null }
+            !active -> { zone = Zone.SILENT; null }
+            forcedZone == ZONE_AUTO -> select(vario)
+            forcedZone > 0 -> table.climbTone(max(vario, FORCED_MIN_CLIMB))
+            forcedZone < 0 -> table.sinkTone(min(vario, FORCED_MAX_LOSS))
+            else -> null
         }
         val amp = volume.coerceIn(0.0, 1.0) * MAX_AMPLITUDE
         val target = if (alarm) ALARM_HZ else tone?.freqHz ?: freq
         if (gain == 0.0) freq = target
         if (!alarm) alarmPos = 0
+        val newLen = if (tone != null) max(1, (tone.cycleMs * sampleRate / 1000.0).toInt()) else 0
 
         for (i in 0 until n) {
             val on: Boolean
@@ -51,10 +58,12 @@ class ToneSynth(private val sampleRate: Int, private val table: ToneTable) {
                 alarmPos++
                 if (alarmPos >= alarmPeriod) alarmPos = 0
             } else if (tone != null) {
-                if (!beeping || cyclePos >= cycleLen) {
+                // Start the next beep when the cycle ends, or early when the wanted cadence has
+                // become quicker than the pause we are sitting in (e.g. sink turning strong).
+                if (!beeping || cyclePos >= cycleLen || (cyclePos >= onLen && cyclePos >= newLen)) {
                     beeping = true
                     cyclePos = 0
-                    cycleLen = max(1, (tone.cycleMs * sampleRate / 1000.0).toInt())
+                    cycleLen = newLen
                     onLen = (cycleLen * tone.dutyPct / 100.0).toInt()
                 }
                 on = cyclePos < onLen
@@ -91,6 +100,9 @@ class ToneSynth(private val sampleRate: Int, private val table: ToneTable) {
         const val CLIMB_HYST = 0.1
         const val SINK_HYST = 0.2
         const val ALARM_HZ = 2400.0
+        const val ZONE_AUTO = 2
+        const val FORCED_MIN_CLIMB = 0.2
+        const val FORCED_MAX_LOSS = -0.5
         private const val FREQ_SMOOTH = 0.002
         private const val TWO_PI = 2 * Math.PI
     }

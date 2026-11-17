@@ -123,9 +123,4 @@ object FilterDefaults {
 
     // Barometer without IMU
     const val BARO_ONLY_ACCEL_SIGMA = 1.0
-
-    // GPS altitude + IMU ("low accuracy")
-    const val GPS_ACCEL_SIGMA = 0.5
-    const val GPS_BIAS_WALK = 1e-2
-    const val GPS_VARIANCE = 4.0 // (2 m)²
 }

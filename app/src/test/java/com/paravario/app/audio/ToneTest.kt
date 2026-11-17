@@ -27,7 +27,7 @@ class ToneTest {
     @Test
     fun tableParsesAndFormatsRoundTrip() {
         val t = ToneTable.parse(ToneTable.DEFAULT_TEXT)
-        assertEquals(8, t.points.size)
+        assertEquals(10, t.points.size)
         val again = ToneTable.parse(t.format())
         assertEquals(t.points, again.points)
     }
@@ -99,6 +99,22 @@ class ToneTest {
         assertTrue(zeroFraction(render(synth, 0.3, -2.4)) < 0.05) // still sinking tone
         render(synth, 0.3, -2.0)
         assertEquals(1.0, zeroFraction(render(synth, 0.3, -2.0)), 0.0)
+    }
+
+    @Test
+    fun forcedZoneDecidesTheSound() {
+        val synth = ToneSynth(sr, ToneTable.DEFAULT)
+        synth.forcedZone = 0
+        assertEquals(1.0, zeroFraction(render(synth, 0.5, 3.0)), 0.0) // told "level": silent even at +3
+        synth.forcedZone = 1
+        val climb = zeroFraction(render(synth, 3.0, 0.05))            // told "climb": beeps even at +0.05
+        assertTrue("climb $climb", climb > 0.35 && climb < 0.6)
+        synth.forcedZone = -1
+        render(synth, 0.2, -1.0)
+        val loss = zeroFraction(render(synth, 6.0, -1.0))             // mild loss: short low boops
+        assertTrue("loss $loss", loss > 0.6 && loss < 0.85)
+        val strong = zeroFraction(render(synth, 2.0, -4.0))           // strong sink: continuous
+        assertTrue("strong $strong", strong < 0.1)
     }
 
     @Test

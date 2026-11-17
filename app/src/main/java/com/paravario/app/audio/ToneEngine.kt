@@ -14,6 +14,7 @@ class ToneEngine(private val table: ToneTable = ToneTable.DEFAULT) {
     @Volatile var volume = 1f
     @Volatile var climbOn = 0.2
     @Volatile var sinkOn = -2.5
+    @Volatile var forcedZone = ToneSynth.ZONE_AUTO
 
     /** Set when audio could not start, so the caller can show it instead of failing silently. */
     @Volatile var error: String? = null
@@ -70,6 +71,7 @@ class ToneEngine(private val table: ToneTable = ToneTable.DEFAULT) {
             while (running) {
                 synth.climbOn = climbOn
                 synth.sinkOn = sinkOn
+                synth.forcedZone = forcedZone
                 synth.render(buf, buf.size, vario.toDouble(), active, alarm, volume.toDouble())
                 if (track.write(buf, 0, buf.size) < 0) throw IllegalStateException("AudioTrack write failed")
             }

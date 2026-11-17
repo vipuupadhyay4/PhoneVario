@@ -29,17 +29,22 @@ import com.paravario.app.CalibrationActivity
 import com.paravario.app.MainActivity
 import com.paravario.app.R
 import com.paravario.app.audio.ToneEngine
+import com.paravario.app.audio.ToneSynth
 import com.paravario.app.diag.Altitude
 import com.paravario.app.vario.AccelCal
 import com.paravario.app.vario.FilterDefaults
+import com.paravario.app.vario.GpsVario
 import com.paravario.app.vario.Kalman2
 import com.paravario.app.vario.Kalman3
 import kotlin.math.abs
 
 /**
- * Foreground service: sensors -> Kalman filter -> tone engine, with a partial wake lock so it
- * keeps running with the screen off. Picks the best altitude source the phone has:
- * barometer + IMU, barometer only, or GPS + IMU (low accuracy).
+ * Foreground service: sensors -> filter -> tone engine, with a partial wake lock so it keeps
+ * running with the screen off. Picks the best altitude source the phone has:
+ *  - barometer + motion sensors: fused Kalman filter (high accuracy)
+ *  - barometer only
+ *  - no barometer: GPS altitude only. No motion sensors are used there, so the result does
+ *    not depend on how the phone is held or carried.
  */
 class VarioService : Service(), SensorEventListener, LocationListener {
 
@@ -51,9 +56,9 @@ class VarioService : Service(), SensorEventListener, LocationListener {
         private const val CALIBRATION_NS = 2_000_000_000L
         private const val GPS_TIMEOUT_MS = 5_000L
         private const val SENSOR_TIMEOUT_MS = 2_000L
-        private const val GPS_JUMP_M = 30.0
+        private const val GPS_WEAK_M = 25.0
+        private const val BARO_JUMP_M = 30.0
         const val CLIMB_ON_BARO = 0.2
-        const val CLIMB_ON_GPS = 0.5 // GPS mode is noisier, so beep only on a clearer climb
 
         fun detectMode(sm: SensorManager): Mode {
             val baro = sm.getDefaultSensor(Sensor.TYPE_PRESSURE) != null
@@ -61,8 +66,7 @@ class VarioService : Service(), SensorEventListener, LocationListener {
             return when {
                 baro && imu -> Mode.BARO_IMU
                 baro -> Mode.BARO_ONLY
-                imu -> Mode.GPS_IMU
-                else -> Mode.NONE
+                else -> Mode.GPS
             }
         }
 
@@ -90,7 +94,7 @@ class VarioService : Service(), SensorEventListener, LocationListener {
     private var mode = Mode.NONE
     private val kf3 = Kalman3(FilterDefaults.BARO_ACCEL_SIGMA, FilterDefaults.BARO_BIAS_WALK)
     private val kf2 = Kalman2(FilterDefaults.BARO_ONLY_ACCEL_SIGMA)
-    private var altitudeVariance = FilterDefaults.BARO_VARIANCE
+    private val gpsVario = GpsVario()
     private var cal = AccelCal.IDENTITY
 
     // All fields below are touched only on the worker thread.
@@ -112,7 +116,9 @@ class VarioService : Service(), SensorEventListener, LocationListener {
     private var lastGpsMs = 0L
     private var hadFix = false
     private var speedKmh = Double.NaN
+    private var gpsAccuracy = Double.NaN
     private var geoidOffset = 0.0
+    private var lastGpsAltitude = Double.NaN
     private var warning = Warning.NONE
 
     private val watchdog = object : Runnable {
@@ -130,6 +136,7 @@ class VarioService : Service(), SensorEventListener, LocationListener {
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         mode = detectMode(sensorManager)
+        VarioSettings.load(this)
         cal = AccelCal.decode(getSharedPreferences("app", MODE_PRIVATE).getString(CalibrationActivity.PREF_KEY, null))
             ?: AccelCal.IDENTITY
         val hasLocation = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -141,7 +148,7 @@ class VarioService : Service(), SensorEventListener, LocationListener {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (mode == Mode.NONE || (mode == Mode.GPS_IMU && !hasLocation)) {
+        if (mode == Mode.GPS && !hasLocation) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -152,15 +159,6 @@ class VarioService : Service(), SensorEventListener, LocationListener {
             acquire()
         }
 
-        if (mode == Mode.GPS_IMU) {
-            kf3.accelSigma = FilterDefaults.GPS_ACCEL_SIGMA
-            kf3.biasWalk = FilterDefaults.GPS_BIAS_WALK
-            altitudeVariance = FilterDefaults.GPS_VARIANCE
-            tone.climbOn = CLIMB_ON_GPS
-        } else {
-            tone.climbOn = CLIMB_ON_BARO
-        }
-
         val t = HandlerThread("vario-sensors").apply { start() }
         val h = Handler(t.looper)
         thread = t
@@ -169,11 +167,12 @@ class VarioService : Service(), SensorEventListener, LocationListener {
         lastAccelMs = now; lastBaroMs = now; lastGpsMs = now
 
         if (mode == Mode.BARO_IMU || mode == Mode.BARO_ONLY) {
+            tone.climbOn = CLIMB_ON_BARO
             sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)?.let {
                 sensorManager.registerListener(this, it, maxOf(it.minDelay, 5000), h)
             }
         }
-        if (mode == Mode.BARO_IMU || mode == Mode.GPS_IMU) {
+        if (mode == Mode.BARO_IMU) {
             sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
                 sensorManager.registerListener(this, it, maxOf(it.minDelay, IMU_PERIOD_US), h)
             }
@@ -181,10 +180,14 @@ class VarioService : Service(), SensorEventListener, LocationListener {
                 sensorManager.registerListener(this, it, maxOf(it.minDelay, IMU_PERIOD_US), h)
             }
         }
+        if (mode == Mode.GPS) tone.forcedZone = 0
         if (hasLocation) startGps(t)
 
         tone.start()
-        VarioState.snap = Snapshot(running = true, mode = mode, warning = Warning.CALIBRATING)
+        VarioState.snap = Snapshot(
+            running = true, mode = mode,
+            warning = if (mode == Mode.GPS) Warning.WAITING_GPS else Warning.CALIBRATING,
+        )
         h.post(watchdog)
         return START_NOT_STICKY
     }
@@ -239,14 +242,15 @@ class VarioService : Service(), SensorEventListener, LocationListener {
     private fun startGps(t: HandlerThread) {
         try {
             if (locationManager.allProviders.contains(LocationManager.GPS_PROVIDER)) {
-                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 200L, 0f, this, t.looper)
+                // Ask for the fastest rate; most phones give 1 fix per second.
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, this, t.looper)
             }
         } catch (_: Exception) {
             // No GPS: in GPS mode the watchdog keeps showing "waiting for GPS".
         }
     }
 
-    // ---- Sensors (worker thread) ----
+    // ---- Sensors (worker thread, barometer phones only) ----
 
     override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
 
@@ -265,11 +269,11 @@ class VarioService : Service(), SensorEventListener, LocationListener {
     private fun onAccel(e: SensorEvent) {
         lastAccelMs = SystemClock.elapsedRealtime()
         if (!haveRot) return
-        // Earth-frame vertical acceleration with gravity removed.
         // Per-axis calibration first, otherwise tilting the phone looks like climb or sink.
         val ax = (e.values[0] - cal.offset[0]) * cal.scale[0]
         val ay = (e.values[1] - cal.offset[1]) * cal.scale[1]
         val azBody = (e.values[2] - cal.offset[2]) * cal.scale[2]
+        // Earth-frame vertical acceleration with gravity removed.
         val az = rot[6] * ax + rot[7] * ay + rot[8] * azBody - G
 
         if (!calibrated) {
@@ -318,22 +322,18 @@ class VarioService : Service(), SensorEventListener, LocationListener {
             lastBaroNs = e.timestamp
             tone.vario = kf2.v.toFloat()
             publish()
-        } else {
-            measure(alt)
+            return
         }
-    }
-
-    /** Altitude measurement for the fused filter (from baro or GPS). */
-    private fun measure(alt: Double) {
+        // Barometer + IMU
         if (!calibrated) return
         if (!filterReady) {
             kf3.reset(alt, bias0)
             filterReady = true
             lastPredictNs = 0L
-        } else if (abs(alt - kf3.h) > GPS_JUMP_M) {
+        } else if (abs(alt - kf3.h) > BARO_JUMP_M) {
             kf3.reset(alt, kf3.b)
         } else {
-            kf3.update(alt, altitudeVariance)
+            kf3.update(alt, FilterDefaults.BARO_VARIANCE)
         }
         publish()
     }
@@ -344,11 +344,19 @@ class VarioService : Service(), SensorEventListener, LocationListener {
         lastGpsMs = SystemClock.elapsedRealtime()
         hadFix = true
         speedKmh = if (location.hasSpeed()) location.speed * 3.6 else Double.NaN
+        gpsAccuracy = if (location.hasVerticalAccuracy()) location.verticalAccuracyMeters.toDouble() else Double.NaN
         if (!location.hasAltitude()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && location.hasMslAltitude()) {
             geoidOffset = location.mslAltitudeMeters - location.altitude
         }
-        if (mode == Mode.GPS_IMU) measure(location.altitude) else publish()
+        lastGpsAltitude = location.altitude
+        if (mode == Mode.GPS) {
+            gpsVario.thresholdScale = VarioSettings.thresholdScale
+            gpsVario.onFix(location.elapsedRealtimeNanos / 1e9, location.altitude)
+            filterReady = gpsVario.ready
+            tone.vario = gpsVario.vario.toFloat()
+        }
+        publish()
     }
 
     override fun onProviderEnabled(provider: String) = Unit
@@ -362,15 +370,16 @@ class VarioService : Service(), SensorEventListener, LocationListener {
     private fun checkHealth() {
         val now = SystemClock.elapsedRealtime()
         val gpsFresh = hadFix && now - lastGpsMs < GPS_TIMEOUT_MS
-        val usesImu = mode == Mode.BARO_IMU || mode == Mode.GPS_IMU
+        val usesImu = mode == Mode.BARO_IMU
         val usesBaro = mode == Mode.BARO_IMU || mode == Mode.BARO_ONLY
         warning = when {
             tone.error != null -> Warning.AUDIO_ERROR
             usesImu && now - lastAccelMs > SENSOR_TIMEOUT_MS -> Warning.SENSOR_STOPPED
             usesBaro && now - lastBaroMs > SENSOR_TIMEOUT_MS -> Warning.SENSOR_STOPPED
-            mode == Mode.GPS_IMU && hadFix && !gpsFresh -> Warning.GPS_LOST
+            mode == Mode.GPS && hadFix && !gpsFresh -> Warning.GPS_LOST
             usesImu && !calibrated -> Warning.CALIBRATING
-            mode == Mode.GPS_IMU && !hadFix -> Warning.WAITING_GPS
+            mode == Mode.GPS && !gpsVario.ready -> Warning.WAITING_GPS
+            mode == Mode.GPS && gpsAccuracy > GPS_WEAK_M -> Warning.GPS_WEAK
             else -> Warning.NONE
         }
         if (!gpsFresh) speedKmh = Double.NaN
@@ -384,10 +393,31 @@ class VarioService : Service(), SensorEventListener, LocationListener {
         tone.alarm = warning == Warning.SENSOR_STOPPED || warning == Warning.GPS_LOST
         val v: Double
         val h: Double
-        if (mode == Mode.BARO_ONLY) {
-            v = kf2.v; h = kf2.h
-        } else {
-            v = kf3.v; h = kf3.h + if (mode == Mode.GPS_IMU) geoidOffset else 0.0
+        val zone: Int
+        when (mode) {
+            Mode.GPS -> {
+                v = gpsVario.vario
+                h = lastGpsAltitude + geoidOffset
+                zone = if (ready) gpsVario.zone else 0
+                // Which of the decided zones are allowed to sound.
+                tone.forcedZone = when {
+                    zone > 0 -> 1
+                    zone < 0 && VarioSettings.lossMode == VarioSettings.LOSS_ALL -> -1
+                    zone < 0 && VarioSettings.lossMode == VarioSettings.LOSS_STRONG &&
+                        v <= VarioSettings.STRONG_SINK -> -1
+                    else -> 0
+                }
+            }
+            Mode.BARO_ONLY -> {
+                v = kf2.v; h = kf2.h
+                zone = if (!ready) 0 else if (v >= CLIMB_ON_BARO) 1 else if (v <= -0.5) -1 else 0
+                tone.forcedZone = ToneSynth.ZONE_AUTO
+            }
+            else -> {
+                v = kf3.v; h = kf3.h
+                zone = if (!ready) 0 else if (v >= CLIMB_ON_BARO) 1 else if (v <= -0.5) -1 else 0
+                tone.forcedZone = ToneSynth.ZONE_AUTO
+            }
         }
         VarioState.snap = Snapshot(
             running = true,
@@ -395,9 +425,14 @@ class VarioService : Service(), SensorEventListener, LocationListener {
             warning = warning,
             ready = ready,
             vario = if (filterReady) v else 0.0,
+            zone = zone,
             altitude = if (filterReady) h else Double.NaN,
             speedKmh = speedKmh,
             gpsFix = hadFix && SystemClock.elapsedRealtime() - lastGpsMs < GPS_TIMEOUT_MS,
+            gpsRateHz = gpsVario.rateHz,
+            gpsNoise = if (mode == Mode.GPS && gpsVario.ready) gpsVario.noise else Double.NaN,
+            gpsAccuracy = gpsAccuracy,
         )
     }
+
 }
